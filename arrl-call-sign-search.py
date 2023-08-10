@@ -6,6 +6,8 @@ import re
 import requests
 import sys
 import tabulate
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 
 def build_query_payload(callsign: str) -> dict:
@@ -15,6 +17,48 @@ def build_query_payload(callsign: str) -> dict:
 
     return query_payload
 
+def get_lat_long(address):
+    try:
+        geolocator = Nominatim(user_agent="arrl_call-sign_search")
+        location = geolocator.geocode(query=address, timeout=2)
+        
+        if location:
+            return location.latitude, location.longitude
+        else:
+            return None, None
+
+    except GeocoderTimedOut:
+        print("Error: The geocoding service timed out.")
+        return None, None
+
+    except GeocoderServiceError as e:
+        print("Error: An error occurred with the geocoding service.")
+        print(e)
+        return None, None
+
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None, None
+
+def find_maidenhead(address):
+    latitude, longitude = get_lat_long(address)
+    
+    # Ensure the longitude is in the range [-180, 180]
+    longitude += 180
+    latitude += 90
+
+    # Calculate the locator characters
+    first_field = chr(int(longitude // 20) + ord('A'))
+    second_field = chr(int(latitude // 10) + ord('A'))
+    first_square = str(int((longitude % 20) // 2))
+    second_square = str(int(latitude % 10))
+    third_subsquare = chr(int((longitude % 2) * 12) + ord('a'))
+    fourth_subsquare = chr(int((latitude % 1) * 24) + ord('a'))
+
+    # Concatenate the characters to form the Maidenhead locator
+    maidenhead_locator = first_field + second_field + first_square + second_square + third_subsquare + fourth_subsquare
+
+    return maidenhead_locator
 
 if __name__ == "__main__":
     # set up command arguments
@@ -76,6 +120,13 @@ if __name__ == "__main__":
                 output["tables"].append([key, value.strip()])
             else:
                 output["basic_info"].append(line)
+    
+    #Look up maidenhead 
+    try:
+        address = call_sign_details_response[1].strip()
+        output["tables"].append(["Grid square", find_maidenhead(address)])
+    except Exception as e: 
+        print(e)
 
     print(output["title"])
     for item in output["basic_info"]:
